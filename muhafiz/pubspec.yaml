@@ -1,0 +1,63 @@
+name: muhafiz
+description: "Muhafiz — Personal Safety App"
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Firebase
+  firebase_core: ^4.9.0
+  firebase_auth: ^6.5.1
+  cloud_firestore: ^6.4.1
+  firebase_messaging: ^16.2.2
+
+  # State management
+  flutter_riverpod: ^3.3.1
+
+  # Permissions / location / notifications
+  geolocator: ^11.0.0
+  permission_handler: ^11.0.0
+  flutter_local_notifications: 21.0.0
+  timezone: 0.11.0
+
+  # Secure token storage
+  flutter_secure_storage: ^9.0.0
+
+  # SVG rendering
+  flutter_svg: ^2.0.0
+
+  # Local key-value storage
+  shared_preferences: ^2.2.0
+  http: ^1.2.0
+  flutter_background_service: ^5.0.0
+  home_widget: ^0.7.0
+  url_launcher: ^6.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo/logo.svg
+    - assets/avatars/women-icon.png
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700

@@ -1,0 +1,35 @@
+# Root gitignore for Muhafiz parent folder
+
+# Node modules
+**/node_modules/
+node_modules/
+
+# Flutter/Dart build files
+**/build/
+build/
+**/.dart_tool/
+.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+
+# Gradle/Android build files
+**/.gradle/
+.gradle/
+**/local.properties
+local.properties
+**/*.iml
+**/.idea/
+.idea/
+*.log
+
+# Environment files (secrets)
+**/.env
+**/.env.local
+**/.env.production
+**/.env.development
+.env
+
+# OS Files
+**/.DS_Store
+Thumbs.db
