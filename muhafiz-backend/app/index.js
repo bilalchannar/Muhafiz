@@ -43,6 +43,7 @@ function createWhatsAppClient() {
   whatsappClient.on("qr", (qr) => {
     console.log("Scan this QR code with your WhatsApp:");
     qrcode.generate(qr, { small: true });
+    console.log("RAW_QR_DATA:" + qr);
   });
 
   whatsappClient.on("authenticated", () => {
