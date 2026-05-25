@@ -27,7 +27,7 @@ class ApiConfig {
       if (Platform.isAndroid) {
         // Use 'http://10.0.2.2:3000' for Android Emulator
         // Use 'http://192.168.1.100:3000' for physical Android device on the current local network
-        return 'https://calm-moose-45.loca.lt';
+        return 'https://muhafiz-server.onrender.com';
       }
     } catch (_) {}
     return 'http://localhost:3000';
