@@ -1,41 +1,60 @@
 # Root gitignore for Muhafiz parent folder
 
-# Node modules
+# ── Node.js ────────────────────────────────────────────────────────────
 **/node_modules/
 node_modules/
 
-# WhatsApp session auth folders
+# ── WhatsApp session / auth data ───────────────────────────────────────
 **/.wwebjs_auth/
-.wwebjs_auth/
 **/.wwebjs_cache/
-.wwebjs_cache/
+**/auth_session/
 
-# Flutter/Dart build files
+# ── Flutter / Dart ─────────────────────────────────────────────────────
 **/build/
-build/
 **/.dart_tool/
-.dart_tool/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
 **/.pub-cache/
+**/.pub/
+**/coverage/
 
-# Gradle/Android build files
+# ── Android secrets ────────────────────────────────────────────────────
+**/android/app/google-services.json
+**/android/local.properties
+**/android/key.properties
+**/*.keystore
+**/*.jks
 **/.gradle/
-.gradle/
 **/local.properties
-local.properties
-**/*.iml
-**/.idea/
-.idea/
-*.log
 
-# Environment files (secrets)
+# ── iOS secrets ────────────────────────────────────────────────────────
+**/ios/GoogleService-Info.plist
+**/ios/Runner/GoogleService-Info.plist
+**/ios/Flutter/flutter_export_environment.sh
+
+# ── Firebase (all platforms) ───────────────────────────────────────────
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_app_id_file.json
+
+# ── IDE & editor ───────────────────────────────────────────────────────
+**/.idea/
+**/*.iml
+**/*.ipr
+**/*.iws
+**/.vscode/settings.json
+
+# ── Environment files (secrets) ────────────────────────────────────────
 **/.env
 **/.env.local
 **/.env.production
 **/.env.development
-.env
 
-# OS Files
+# ── Crash logs & generated files ───────────────────────────────────────
+*.log
+hs_err_pid*.log
+
+# ── OS files ───────────────────────────────────────────────────────────
 **/.DS_Store
 Thumbs.db
+Desktop.ini

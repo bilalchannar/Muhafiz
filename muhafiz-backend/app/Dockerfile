@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
 # and point to the system-installed Chromium binary
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV SESSION_PATH=/opt/render/project/src/auth_session
 
 WORKDIR /usr/src/app
 

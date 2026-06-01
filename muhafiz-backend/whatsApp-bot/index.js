@@ -1,9 +1,20 @@
+const fs = require("fs");
+const path = require("path");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const express = require("express");
 require("dotenv").config();
 const app = express();
 app.use(express.json());
+
+const WHATSAPP_CLIENT_ID = "muhafiz-whatsapp-bot";
+const SESSION_PATH = path.resolve(
+  process.env.SESSION_PATH || path.join(__dirname, "auth_session")
+);
+
+fs.mkdirSync(SESSION_PATH, { recursive: true });
+console.log(`🗂️ WhatsApp session path: ${SESSION_PATH}`);
+console.log(`🆔 WhatsApp client ID: ${WHATSAPP_CLIENT_ID}`);
 
 
 // ── WhatsApp Client Setup ──────────────────────────────────────────────
@@ -28,7 +39,10 @@ function createClient() {
   }
 
   client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+      clientId: WHATSAPP_CLIENT_ID,
+      dataPath: SESSION_PATH,
+    }),
     puppeteer: puppeteerOptions,
   });
 
@@ -37,12 +51,14 @@ function createClient() {
   });
 
   client.on("qr", (qr) => {
-    console.log("Scan this QR code with your WhatsApp:");
+    console.log("📲 WhatsApp QR code generated. Scan it with your phone.");
     qrcode.generate(qr, { small: true });
+    console.log(`💾 QR code stored for the /qr page at ${SESSION_PATH}`);
   });
 
   client.on("authenticated", () => {
-    console.log("🔑 Authenticated successfully");
+    console.log("🔑 WhatsApp authenticated successfully");
+    console.log(`💾 WhatsApp credentials/session saved in ${SESSION_PATH}`);
   });
 
   client.on("auth_failure", async (msg) => {

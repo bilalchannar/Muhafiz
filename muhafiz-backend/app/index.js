@@ -1,7 +1,10 @@
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
 require("dotenv").config();
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { MongoClient } = require("mongodb");
+const { Client, LocalAuth, RemoteAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 
 const authRoutes = require("./Routes/auth");
@@ -10,10 +13,100 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const SESSION_ID = process.env.SESSION_ID || "main-whatsapp-session";
+const SESSION_PATH = path.resolve(
+  process.env.SESSION_PATH || path.join(__dirname, "auth_session")
+);
+const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "muhafiz";
+const MONGODB_COLLECTION = process.env.MONGODB_COLLECTION || "whatsapp_sessions";
+
+fs.mkdirSync(SESSION_PATH, { recursive: true });
+console.log(`🗂️ WhatsApp temporary auth path: ${SESSION_PATH}`);
+console.log(`🆔 WhatsApp session ID: ${SESSION_ID}`);
+
+class MongoRemoteAuthStore {
+  constructor({ mongoClient, dbName, collectionName, dataPath }) {
+    this.mongoClient = mongoClient;
+    this.dbName = dbName;
+    this.collectionName = collectionName;
+    this.dataPath = dataPath;
+  }
+
+  get collection() {
+    return this.mongoClient.db(this.dbName).collection(this.collectionName);
+  }
+
+  async sessionExists({ session }) {
+    const existing = await this.collection.findOne(
+      { session },
+      { projection: { _id: 1 } }
+    );
+    return !!existing;
+  }
+
+  async save({ session }) {
+    const sessionZipPath = path.join(this.dataPath, `${session}.zip`);
+    const sessionZip = await fs.promises.readFile(sessionZipPath);
+
+    await this.collection.updateOne(
+      { session },
+      {
+        $set: {
+          session,
+          data: sessionZip.toString("base64"),
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+
+    console.log(`💾 Session saved to MongoDB: ${session}`);
+  }
+
+  async extract({ session, path: zipPath }) {
+    const document = await this.collection.findOne({ session });
+
+    if (!document) {
+      return;
+    }
+
+    await fs.promises.mkdir(path.dirname(zipPath), { recursive: true });
+    await fs.promises.writeFile(zipPath, Buffer.from(document.data, "base64"));
+    console.log(`📦 Session loaded from MongoDB: ${session}`);
+  }
+
+  async delete({ session }) {
+    await this.collection.deleteOne({ session });
+  }
+}
+
 // ── WhatsApp Client Setup ──────────────────────────────────────────────
 let whatsappClient;
 let isWhatsAppReady = false;
 let latestQrCode = null;
+let mongoStore = null;
+
+async function connectMongoIfConfigured() {
+  if (!MONGODB_URI) {
+    console.log("ℹ️ MONGODB_URI is not set. Using LocalAuth for local development.");
+    return null;
+  }
+
+  const mongoClient = new MongoClient(MONGODB_URI, {
+    serverSelectionTimeoutMS: 10000,
+  });
+
+  await mongoClient.connect();
+  console.log("✅ MongoDB connected");
+
+  return new MongoRemoteAuthStore({
+    mongoClient,
+    dbName: MONGODB_DB_NAME,
+    collectionName: MONGODB_COLLECTION,
+    dataPath: SESSION_PATH,
+  });
+}
 
 function createWhatsAppClient() {
   const puppeteerOptions = {
@@ -32,8 +125,21 @@ function createWhatsAppClient() {
     puppeteerOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 
+  const authStrategy = mongoStore
+    ? new RemoteAuth({
+        clientId: SESSION_ID,
+        store: mongoStore,
+        dataPath: SESSION_PATH,
+        backupSyncIntervalMs: 60000,
+        rmMaxRetries: 3,
+      })
+    : new LocalAuth({
+        clientId: SESSION_ID,
+        dataPath: SESSION_PATH,
+      });
+
   whatsappClient = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy,
     puppeteer: puppeteerOptions,
   });
 
@@ -42,10 +148,11 @@ function createWhatsAppClient() {
   });
 
   whatsappClient.on("qr", (qr) => {
-    console.log("Scan this QR code with your WhatsApp:");
+    console.log("📲 WhatsApp QR code generated. Scan it with your phone.");
     qrcode.generate(qr, { small: true });
     console.log("RAW_QR_DATA:" + qr);
     latestQrCode = qr;
+    console.log(`💾 QR code generated for session ${SESSION_ID}`);
   });
 
   whatsappClient.on("authenticated", () => {
@@ -81,7 +188,17 @@ function createWhatsAppClient() {
   whatsappClient.initialize();
 }
 
-createWhatsAppClient();
+async function bootstrap() {
+  try {
+    mongoStore = await connectMongoIfConfigured();
+    createWhatsAppClient();
+  } catch (err) {
+    console.error("❌ Failed to start WhatsApp bot:", err);
+    process.exit(1);
+  }
+}
+
+bootstrap();
 
 /**
  * Normalise a phone number to the WhatsApp chat-id format.
@@ -140,7 +257,7 @@ app.get("/qr", (req, res) => {
       <p>This page automatically refreshes every 15 seconds to keep the code fresh.</p>
       <canvas id="canvas"></canvas>
       <script>
-        const qrText = \`\${latestQrCode}\`;
+        const qrText = ${JSON.stringify(latestQrCode)};
         if (qrText) {
           QRCode.toCanvas(document.getElementById('canvas'), qrText, { width: 300 }, function (error) {
             if (error) console.error(error);

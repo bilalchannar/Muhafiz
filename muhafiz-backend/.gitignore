@@ -1,0 +1,7 @@
+auth_session/
+app/auth_session/
+app/.wwebjs_auth/
+app/.wwebjs_cache/
+whatsApp-bot/auth_session/
+whatsApp-bot/.wwebjs_auth/
+whatsApp-bot/.wwebjs_cache/

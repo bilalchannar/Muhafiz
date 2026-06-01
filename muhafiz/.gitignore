@@ -43,3 +43,26 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ── Firebase / Google services secrets ────────────────────────────────
+# These files contain API keys and must not be committed.
+# Add them manually after cloning. See README for instructions.
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+ios/GoogleService-Info.plist
+
+# ── Android signing ────────────────────────────────────────────────────
+android/key.properties
+android/local.properties
+*.keystore
+*.jks
+
+# ── iOS ────────────────────────────────────────────────────────────────
+ios/Flutter/flutter_export_environment.sh
+
+# ── Environment & secrets ──────────────────────────────────────────────
+.env
+.env.local
+
+# ── Crash logs ─────────────────────────────────────────────────────────
+hs_err_pid*.log
