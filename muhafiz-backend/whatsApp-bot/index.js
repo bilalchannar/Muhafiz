@@ -22,6 +22,19 @@ let client;
 let isClientReady = false;
 let latestQrCode = null;
 
+// Helper to delete corrupted or disconnected session files
+function deleteSessionDir() {
+  const sessionDir = path.join(SESSION_PATH, ".wwebjs_auth", `session-${WHATSAPP_CLIENT_ID}`);
+  if (fs.existsSync(sessionDir)) {
+    try {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      console.log(`🗑️ Deleted session directory to reset authentication: ${sessionDir}`);
+    } catch (err) {
+      console.error(`❌ Failed to delete session directory:`, err);
+    }
+  }
+}
+
 function createClient() {
   const puppeteerOptions = {
     headless: true,
@@ -29,7 +42,11 @@ function createClient() {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu"
+      "--disable-gpu",
+      "--no-first-run",
+      "--no-zygote",
+      "--single-process", // Essential to conserve memory on Render Free Tier
+      "--disable-extensions"
     ],
   };
 
@@ -44,6 +61,12 @@ function createClient() {
       clientId: WHATSAPP_CLIENT_ID,
       dataPath: SESSION_PATH,
     }),
+    authTimeoutMs: 120000, // 2 minutes startup grace period
+    qrTimeoutMs: 60000,    // 1 minute QR expiry period
+    webVersionCache: {
+      type: "remote",
+      remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
+    },
     puppeteer: puppeteerOptions,
   });
 
@@ -67,10 +90,10 @@ function createClient() {
     console.error("❌ Auth failure:", msg);
     isClientReady = false;
     latestQrCode = null;
-    // Destroy the old client and re-create so a fresh QR is shown
     try {
       await client.destroy();
     } catch (_) {}
+    deleteSessionDir(); // Clear corrupted session
     console.log("🔄 Reinitializing client...");
     createClient();
   });
@@ -85,10 +108,10 @@ function createClient() {
     isClientReady = false;
     latestQrCode = null;
     console.log("❌ WhatsApp client disconnected:", reason);
-    // Auto-reconnect
     try {
       await client.destroy();
     } catch (_) {}
+    deleteSessionDir(); // Clear session to allow fresh login scan
     console.log("🔄 Reinitializing client...");
     createClient();
   });
