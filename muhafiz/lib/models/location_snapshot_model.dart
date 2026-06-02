@@ -3,6 +3,7 @@ enum LocationStatus {
   requesting,
   granted,
   denied,
+  permanentlyDenied,
   serviceDisabled,
   unavailable,
 }
@@ -39,6 +40,8 @@ class LocationSnapshot {
         return 'Requesting location';
       case LocationStatus.denied:
         return 'Permission denied';
+      case LocationStatus.permanentlyDenied:
+        return 'Location permission permanently denied. Please enable it in Settings.';
       case LocationStatus.serviceDisabled:
         return 'Location disabled';
       case LocationStatus.unavailable:

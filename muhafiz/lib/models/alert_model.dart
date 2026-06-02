@@ -1,6 +1,6 @@
 enum AlertType { emergency, vulnerable }
 
-enum AlertStatus { pending, sent, cancelled, failed }
+enum AlertStatus { pending, sent, cancelled, failed, delivered }
 
 class AlertModel {
   final String id;

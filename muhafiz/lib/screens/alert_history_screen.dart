@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:muhafiz/core/constants.dart';
 import 'package:muhafiz/models/alert_model.dart';
+import 'package:muhafiz/models/trustee_model.dart';
 import 'package:muhafiz/providers/alerts_provider.dart';
+import 'package:muhafiz/providers/trustees_provider.dart';
 
 class AlertHistoryScreen extends ConsumerStatefulWidget {
   const AlertHistoryScreen({super.key});
@@ -26,11 +28,17 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
   Widget build(BuildContext context) {
     final alerts = ref.watch(alertsProvider);
     final filteredAlerts = _filterAlerts(alerts);
-    
+
     final totalAlerts = alerts.length;
-    final emergencyAlerts = alerts.where((a) => a.type == AlertType.emergency).length;
-    final vulnerableAlerts = alerts.where((a) => a.type == AlertType.vulnerable).length;
-    final lastAlert = alerts.isEmpty ? 'No alerts' : _formatTime(alerts.first.createdAt);
+    final emergencyAlerts = alerts
+        .where((a) => a.type == AlertType.emergency)
+        .length;
+    final vulnerableAlerts = alerts
+        .where((a) => a.type == AlertType.vulnerable)
+        .length;
+    final lastAlert = alerts.isEmpty
+        ? 'No alerts'
+        : _formatTime(alerts.first.createdAt);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
@@ -86,7 +94,9 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
               child: RefreshIndicator(
                 onRefresh: () => ref.read(alertsProvider.notifier).load(),
                 color: AppColors.primary,
-                child: filteredAlerts.isEmpty ? _buildEmptyState() : _buildList(filteredAlerts),
+                child: filteredAlerts.isEmpty
+                    ? _buildEmptyState()
+                    : _buildList(filteredAlerts),
               ),
             ),
           ],
@@ -202,6 +212,20 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
     );
   }
 
+  Color _colorForStatus(AlertStatus status) {
+    switch (status) {
+      case AlertStatus.delivered:
+      case AlertStatus.sent:
+        return AppColors.safe;
+      case AlertStatus.pending:
+        return Colors.orange;
+      case AlertStatus.failed:
+        return AppColors.primary;
+      case AlertStatus.cancelled:
+        return Colors.grey;
+    }
+  }
+
   Widget _alertCard(AlertModel alert) {
     final accent = _accentForAlert(alert);
     return InkWell(
@@ -237,13 +261,20 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
                     ),
                   ),
                 ),
-                Text(
-                  _labelForStatus(alert.status),
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.black.withValues(alpha: 0.6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _colorForStatus(alert.status).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    _labelForStatus(alert.status),
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: _colorForStatus(alert.status),
+                    ),
                   ),
                 ),
               ],
@@ -296,67 +327,117 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
   void _showDetails(AlertModel alert) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => Padding(
+      builder: (_) => Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _labelForType(alert.type),
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _labelForType(alert.type),
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _formatTime(alert.createdAt),
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
-                color: AppColors.black.withValues(alpha: 0.6),
+              const SizedBox(height: 6),
+              Text(
+                _formatTime(alert.createdAt),
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  color: AppColors.black.withValues(alpha: 0.6),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Status: ${_labelForStatus(alert.status)}',
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 12),
+              Text(
+                alert.message,
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              alert.message,
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
+              const SizedBox(height: 6),
+              Text(
+                'Location: ${alert.address ?? "Location details saved to safety logs."}',
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Contacts notified: ${alert.sentToTrusteeIds.length}',
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
+              const SizedBox(height: 16),
+              const Text(
+                'Trustee Dispatch Status',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Location: ${alert.address ?? "Location sharing will be added soon."}',
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
-              ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              if (alert.sentToTrusteeIds.isEmpty)
+                const Text('No trustees notified.', style: TextStyle(fontSize: 11, color: Colors.grey))
+              else
+                ...alert.sentToTrusteeIds.map((id) {
+                  final trustees = ref.read(trusteesProvider);
+                  final trustee = trustees.firstWhere(
+                    (t) => t.id == id,
+                    orElse: () => TrusteeModel(id: id, name: 'Trustee', phone: '', userId: '', relationship: 'Contact', priority: 'secondary'),
+                  );
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          trustee.name,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'WhatsApp: Sent',
+                                style: TextStyle(fontSize: 9, color: Colors.green, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: alert.status == AlertStatus.failed ? Colors.red.shade50 : Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                alert.status == AlertStatus.failed ? 'Failed' : 'Pending Check-in',
+                                style: TextStyle(
+                                  fontSize: 9, 
+                                  color: alert.status == AlertStatus.failed ? Colors.red : Colors.orange.shade800,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
         ),
       ),
     );
@@ -366,35 +447,44 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+        SizedBox(height: MediaQuery.of(context).size.height * 0.18),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 40),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.notifications_none,
-                size: 72,
-                color: AppColors.black.withValues(alpha: 0.2),
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.notifications_none_rounded,
+                  size: 40,
+                  color: AppColors.primary,
+                ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               const Text(
-                'No alerts yet',
+                'No Alerts Logged',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 18,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w800,
                   color: AppColors.black,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Your emergency and protective mode activity will appear here.',
+                'All your emergency transmissions and safety check-ins will be recorded here for review.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 13,
-                  color: AppColors.black.withValues(alpha: 0.6),
+                  color: AppColors.black.withValues(alpha: 0.55),
+                  height: 1.4,
                 ),
               ),
             ],
@@ -427,6 +517,8 @@ class _AlertHistoryScreenState extends ConsumerState<AlertHistoryScreen> {
         return 'Failed';
       case AlertStatus.pending:
         return 'Pending';
+      case AlertStatus.delivered:
+        return 'Delivered';
     }
   }
 

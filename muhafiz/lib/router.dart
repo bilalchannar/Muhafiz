@@ -12,6 +12,7 @@ import 'package:muhafiz/screens/location_permission_screen.dart';
 import 'package:muhafiz/screens/add_trusted_contact_setup_screen.dart';
 import 'package:muhafiz/screens/active_emergency_screen.dart';
 import 'package:muhafiz/screens/admin_dashboard_screen.dart';
+import 'package:muhafiz/screens/battery_optimization_screen.dart';
 import 'package:muhafiz/core/secure_storage.dart';
 import 'package:muhafiz/providers/auth_provider.dart';
 import 'package:muhafiz/providers/user_provider.dart';
@@ -34,6 +35,7 @@ class AppRoutes {
   static const safetyCenter = '/safety-center';
   static const profile = '/profile';
   static const adminDashboard = '/admin-dashboard';
+  static const batteryOptimization = '/battery-optimization';
 }
 
 Route<dynamic> onGenerateAppRoute(RouteSettings settings) {
@@ -82,6 +84,8 @@ Route<dynamic> onGenerateAppRoute(RouteSettings settings) {
       return MaterialPageRoute(builder: (_) => const VulnerableModeScreen());
     case AppRoutes.emergency:
       return MaterialPageRoute(builder: (_) => const EmergencyModeScreen());
+    case AppRoutes.batteryOptimization:
+      return MaterialPageRoute(builder: (_) => const BatteryOptimizationScreen());
     default:
       return MaterialPageRoute(builder: (_) => const _SplashRedirect());
   }

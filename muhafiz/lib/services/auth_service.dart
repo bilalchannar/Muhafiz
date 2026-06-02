@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:muhafiz/core/constants.dart';
 import 'package:muhafiz/core/secure_storage.dart';
 import 'package:muhafiz/models/user_model.dart';
@@ -59,6 +60,8 @@ class AuthService {
         final sessionId = data['sessionId'];
         if (sessionId != null) {
           await SecureStorage.saveSessionId(sessionId);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('bg_session_id', sessionId);
         }
       } else {
         throw Exception(data['message'] ?? 'Invalid OTP');

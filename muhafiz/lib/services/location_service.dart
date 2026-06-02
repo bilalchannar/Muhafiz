@@ -25,6 +25,11 @@ class LocationService {
       p = await Geolocator.requestPermission();
     }
     
+    // For background service reliability, request upgrade to always permission on mobile platforms
+    if (!kIsWeb && p == LocationPermission.whileInUse) {
+      p = await Geolocator.requestPermission();
+    }
+    
     if (p == LocationPermission.deniedForever) {
       if (!kIsWeb) {
         await Geolocator.openAppSettings();
@@ -40,7 +45,10 @@ class LocationService {
     if (!serviceEnabled) return const LocationSnapshot(status: LocationStatus.serviceDisabled);
 
     LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.deniedForever) {
+      return const LocationSnapshot(status: LocationStatus.permanentlyDenied);
+    }
+    if (permission == LocationPermission.denied) {
       return const LocationSnapshot(status: LocationStatus.denied);
     }
 
@@ -79,7 +87,10 @@ class LocationService {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.deniedForever) {
+      return const LocationSnapshot(status: LocationStatus.permanentlyDenied);
+    }
+    if (permission == LocationPermission.denied) {
       return const LocationSnapshot(status: LocationStatus.denied);
     }
 

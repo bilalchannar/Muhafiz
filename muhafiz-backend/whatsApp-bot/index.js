@@ -20,6 +20,7 @@ console.log(`🆔 WhatsApp client ID: ${WHATSAPP_CLIENT_ID}`);
 // ── WhatsApp Client Setup ──────────────────────────────────────────────
 let client;
 let isClientReady = false;
+let latestQrCode = null;
 
 function createClient() {
   const puppeteerOptions = {
@@ -53,6 +54,7 @@ function createClient() {
   client.on("qr", (qr) => {
     console.log("📲 WhatsApp QR code generated. Scan it with your phone.");
     qrcode.generate(qr, { small: true });
+    latestQrCode = qr;
     console.log(`💾 QR code stored for the /qr page at ${SESSION_PATH}`);
   });
 
@@ -64,6 +66,7 @@ function createClient() {
   client.on("auth_failure", async (msg) => {
     console.error("❌ Auth failure:", msg);
     isClientReady = false;
+    latestQrCode = null;
     // Destroy the old client and re-create so a fresh QR is shown
     try {
       await client.destroy();
@@ -74,11 +77,13 @@ function createClient() {
 
   client.on("ready", () => {
     isClientReady = true;
+    latestQrCode = null;
     console.log("✅ WhatsApp client is ready!");
   });
 
   client.on("disconnected", async (reason) => {
     isClientReady = false;
+    latestQrCode = null;
     console.log("❌ WhatsApp client disconnected:", reason);
     // Auto-reconnect
     try {
@@ -106,6 +111,89 @@ function formatPhone(phone) {
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────
+
+const BOT_API_KEY = process.env.BOT_API_KEY || "muhafiz-bot-secret-key";
+
+// Simple API Key middleware
+app.use((req, res, next) => {
+  // Allow health and QR endpoints without API key so devs/admins can check status and scan QR code in browser
+  if (
+    req.path === "/health" ||
+    req.path === "/qr" ||
+    req.path === "/qr-code"
+  ) {
+    return next();
+  }
+  const apiKey = req.headers["x-api-key"];
+  if (!apiKey || apiKey !== BOT_API_KEY) {
+    return res.status(401).json({ success: false, message: "Unauthorized: Invalid API Key" });
+  }
+  next();
+});
+
+// JSON endpoint for QR code
+app.get("/qr-code", (req, res) => {
+  res.json({ qr: latestQrCode, ready: isClientReady });
+});
+
+// HTML page for scanning QR code directly on the bot service
+app.get("/qr", (req, res) => {
+  if (isClientReady) {
+    return res.send("<h1>✅ WhatsApp is already connected!</h1>");
+  }
+  if (!latestQrCode) {
+    return res.send("<h1>⏳ QR Code not generated yet. Please wait or reload...</h1><meta http-equiv='refresh' content='5'>");
+  }
+
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>Scan WhatsApp QR Code</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.4.4/build/qrcode.min.js"></script>
+    <meta http-equiv="refresh" content="15">
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f2f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+      }
+      canvas {
+        margin: 20px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Scan this QR Code (WhatsApp Bot)</h2>
+      <p>This page automatically refreshes every 15 seconds to keep the code fresh.</p>
+      <canvas id="canvas"></canvas>
+      <script>
+        const qrText = ${JSON.stringify(latestQrCode)};
+        if (qrText) {
+          QRCode.toCanvas(document.getElementById('canvas'), qrText, { width: 300 }, function (error) {
+            if (error) console.error(error);
+          });
+        }
+      </script>
+    </div>
+  </body>
+  </html>
+  `;
+  res.send(html);
+});
 
 /**
  * POST /sendMessage

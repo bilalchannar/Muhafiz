@@ -430,6 +430,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 const Divider(height: 1, indent: 48),
                 _settingTile(
+                  label: 'Battery Optimization',
+                  icon: Icons.battery_charging_full_outlined,
+                  onTap: () => Navigator.pushNamed(context, AppRoutes.batteryOptimization),
+                ),
+                const Divider(height: 1, indent: 48),
+                _settingTile(
                   label: 'Clear local data',
                   icon: Icons.delete_outline,
                   textColor: AppColors.primary,

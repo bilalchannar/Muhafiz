@@ -91,19 +91,30 @@ void onStart(ServiceInstance service) async {
     String finalMessage = message;
     if (includeLocation) {
       try {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.best,
-        ).timeout(const Duration(seconds: 10));
-        finalMessage +=
-            '\nLocation: https://maps.google.com/?q=${position.latitude},${position.longitude}';
-      } catch (_) {}
+        final permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.always) {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.best,
+          ).timeout(const Duration(seconds: 10));
+          finalMessage +=
+              '\nLocation: https://maps.google.com/?q=${position.latitude},${position.longitude}';
+        } else {
+          finalMessage += '\n[Location Unavailable: Background permission restricted]';
+        }
+      } catch (e) {
+        finalMessage += '\n[Location Unavailable: Error fetching location]';
+      }
     }
 
+    final String sessionId = prefs.getString('bg_session_id') ?? '';
     try {
       // print('BG Service - Sending mass message to ${phones.length} contacts...');
       await http.post(
         Uri.parse('${ApiConfig.baseUrl}/sendMassMsg'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $sessionId',
+        },
         body: jsonEncode({'phone': phones, 'message': finalMessage}),
       );
       // print('BG Service - Message sent, status: ${response.statusCode}');

@@ -27,9 +27,7 @@ class AlertRepository {
     try {
       if (userId == null) return localAlerts;
       final remote = await _firestore.queryCollection(
-        'alerts',
-        ownerId: userId,
-        ownerField: 'userId',
+        'users/$userId/alerts',
       );
       final remoteAlerts = remote.map(AlertModel.fromJson).toList();
       remoteAlerts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -45,7 +43,7 @@ class AlertRepository {
     final encoded = alerts.map((a) => a.toJson()).toList();
     await _storage.saveString(_alertsKey, jsonEncode(encoded));
     for (final alert in alerts) {
-      await _firestore.upsertDocument('alerts', alert.id, alert.toJson());
+      await _firestore.upsertDocument('users/$userId/alerts', alert.id, alert.toJson());
     }
   }
 
@@ -53,14 +51,12 @@ class AlertRepository {
     await _storage.remove(_alertsKey);
     if (userId == null) return;
     final remote = await _firestore.queryCollection(
-      'alerts',
-      ownerId: userId,
-      ownerField: 'userId',
+      'users/$userId/alerts',
     );
     for (final alert in remote) {
       final id = alert['id']?.toString();
       if (id != null && id.isNotEmpty) {
-        await _firestore.deleteDocument('alerts', id);
+        await _firestore.deleteDocument('users/$userId/alerts', id);
       }
     }
   }

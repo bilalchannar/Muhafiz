@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AppColors {
   AppColors._();
@@ -20,16 +18,13 @@ class ApiConfig {
   ApiConfig._();
   
   static String get baseUrl {
-    if (kIsWeb) {
-      return 'http://localhost:3000';
+    // Read from environment variable (supplied via --dart-define=API_URL=...)
+    const envUrl = String.fromEnvironment('API_URL');
+    if (envUrl.isNotEmpty) {
+      return envUrl;
     }
-    try {
-      if (Platform.isAndroid) {
-        // Use 'http://10.0.2.2:3000' for Android Emulator
-        // Use 'http://192.168.1.100:3000' for physical Android device on the current local network
-        return 'https://muhafiz-server.onrender.com';
-      }
-    } catch (_) {}
-    return 'http://localhost:3000';
+    
+    // Default fallback consistent across Android, iOS, and Web
+    return 'https://muhafiz-server.onrender.com';
   }
 }

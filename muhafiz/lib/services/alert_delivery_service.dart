@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:muhafiz/core/constants.dart';
+import 'package:muhafiz/core/secure_storage.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:muhafiz/models/alert_model.dart';
@@ -23,16 +24,47 @@ class AlertDeliveryService {
     required this.locationService,
   });
 
-  Future<void> sendMassMessage(List<String> phones, String message) async {
-    if (phones.isEmpty) return;
+  Future<void> _saveLocalAlert(AlertModel alert) async {
     try {
-      await http.post(
+      final prefs = await SharedPreferences.getInstance();
+      final String? raw = prefs.getString('muhafiz_alerts');
+      List<AlertModel> list = [];
+      if (raw != null && raw.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(raw);
+        list = decoded.map((e) => AlertModel.fromJson(e)).toList();
+      }
+
+      // Update existing or prepend new
+      final index = list.indexWhere((a) => a.id == alert.id);
+      if (index != -1) {
+        list[index] = alert;
+      } else {
+        list.insert(0, alert);
+      }
+
+      await prefs.setString('muhafiz_alerts', jsonEncode(list.map((a) => a.toJson()).toList()));
+    } catch (_) {}
+  }
+
+  Future<bool> sendMassMessage(List<String> phones, String message) async {
+    if (phones.isEmpty) return false;
+    try {
+      final sessionId = await SecureStorage.getSessionId() ?? '';
+      final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/sendMassMsg'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $sessionId',
+        },
         body: jsonEncode({'phone': phones, 'message': message}),
       );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+      return false;
     } catch (e) {
-      // Ignore errors for now
+      return false;
     }
   }
 
@@ -103,7 +135,7 @@ class AlertDeliveryService {
         id: 'alert_${DateTime.now().millisecondsSinceEpoch}',
         userId: userId,
         type: AlertType.emergency,
-        status: AlertStatus.sent,
+        status: AlertStatus.pending,
         message: messageWithUser,
         latitude: lat,
         longitude: lng,
@@ -111,9 +143,19 @@ class AlertDeliveryService {
         createdAt: DateTime.now(),
       );
 
+      // Save pending alert (local & Firestore)
+      await sendEmergencyAlert(alert);
+
       // Extract phone numbers and send immediately
       final phones = trustees.map((t) => t.phone).toList();
-      await sendMassMessage(phones, finalMessage);
+      final success = await sendMassMessage(phones, finalMessage);
+
+      // Update status based on sending result
+      final updatedAlert = alert.copyWith(
+        status: success ? AlertStatus.delivered : AlertStatus.failed,
+        updatedAt: DateTime.now(),
+      );
+      await sendEmergencyAlert(updatedAlert);
 
       await prefs.setBool('bg_active', true);
       await prefs.setInt('bg_interval', 30);
@@ -127,7 +169,7 @@ class AlertDeliveryService {
         await service.startService();
       }
 
-      return await sendEmergencyAlert(alert);
+      return success;
     } catch (e) {
       return false;
     }
@@ -135,10 +177,13 @@ class AlertDeliveryService {
 
   Future<bool> sendEmergencyAlert(AlertModel alert) async {
     try {
-      // 1. Save alert to Firestore
-      await firestoreService.upsertDocument('alerts', alert.id, alert.toJson());
+      // 1. Save local backup first
+      await _saveLocalAlert(alert);
 
-      // 2. Notify locally
+      // 2. Save alert to user-scoped subcollection path
+      await firestoreService.upsertDocument('users/${alert.userId}/alerts', alert.id, alert.toJson());
+
+      // 3. Notify locally
       if (!kIsWeb) {
         await notificationService.showNotification(
           id: 1,
@@ -200,18 +245,19 @@ class AlertDeliveryService {
         'lastCheckInAt': DateTime.now().toIso8601String(),
       };
 
+      // Save safety session to user-scoped subcollection path
       await firestoreService.upsertDocument(
-        'safety_sessions',
+        'users/$userId/safety_sessions',
         sessionId,
         sessionData,
       );
 
-      // Save a Vulnerable Alert to the alert history
+      // Save a Vulnerable Alert to the alert history as pending
       final alert = AlertModel(
         id: 'alert_${DateTime.now().millisecondsSinceEpoch}',
         userId: userId,
         type: AlertType.vulnerable,
-        status: AlertStatus.sent,
+        status: AlertStatus.pending,
         message: messageWithUser,
         latitude: lat,
         longitude: lng,
@@ -232,7 +278,14 @@ class AlertDeliveryService {
       final phones = trustees.map((t) => t.phone).toList();
 
       // Send initial message immediately
-      await sendMassMessage(phones, finalMessage);
+      final success = await sendMassMessage(phones, finalMessage);
+
+      // Update status to delivered or failed based on success
+      final updatedAlert = alert.copyWith(
+        status: success ? AlertStatus.delivered : AlertStatus.failed,
+        updatedAt: DateTime.now(),
+      );
+      await sendVulnerableAlert(updatedAlert);
 
       await prefs.setBool('bg_active', true);
       await prefs.setInt('bg_interval', checkInMinutes * 60);
@@ -252,7 +305,10 @@ class AlertDeliveryService {
 
   Future<bool> sendVulnerableAlert(AlertModel alert) async {
     try {
-      await firestoreService.upsertDocument('alerts', alert.id, alert.toJson());
+      // Save local backup first
+      await _saveLocalAlert(alert);
+      // Save alert to user-scoped subcollection path
+      await firestoreService.upsertDocument('users/${alert.userId}/alerts', alert.id, alert.toJson());
       return true;
     } catch (e) {
       return false;

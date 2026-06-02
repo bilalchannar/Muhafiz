@@ -25,35 +25,36 @@ class TrusteeRepository {
       }
     } catch (_) {}
 
+    // 1. Load local cache as backup
+    List<TrusteeModel> localList = [];
     try {
       final raw = await _storage.getString(_trusteesKey);
-      if (raw == null || raw.isEmpty) throw Exception('No local trustees');
-      final List<dynamic> decoded = jsonDecode(raw);
-      final trustees = decoded.map((e) => TrusteeModel.fromJson(e)).toList();
-      // Extra safety: only return trustees belonging to this user.
-      return trustees.where((t) => t.userId == userId).toList();
-    } catch (_) {
-      try {
-        final remote = await _firestore.queryCollection(
-          'trustees',
-          ownerId: userId,
-          ownerField: 'userId',
-        );
-        final list = remote.map(TrusteeModel.fromJson).toList();
-        list.sort((a, b) {
-          final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return bTime.compareTo(aTime);
-        });
-        if (list.isNotEmpty) {
-          final encoded = list.map((t) => t.toJson()).toList();
-          await _storage.saveString(_trusteesKey, jsonEncode(encoded));
-        }
-        return list;
-      } catch (e) {
-        // print('Error loading remote trustees: $e');
-        return [];
+      if (raw != null && raw.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(raw);
+        final trustees = decoded.map((e) => TrusteeModel.fromJson(e)).toList();
+        localList = trustees.where((t) => t.userId == userId).toList();
       }
+    } catch (_) {}
+
+    // 2. Fetch remote trustees first from scoped user subcollection
+    try {
+      final remote = await _firestore.queryCollection(
+        'users/$userId/trustees',
+      );
+      final list = remote.map(TrusteeModel.fromJson).toList();
+      list.sort((a, b) {
+        final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bTime.compareTo(aTime);
+      });
+
+      // Update local storage cache for offline backup
+      final encoded = list.map((t) => t.toJson()).toList();
+      await _storage.saveString(_trusteesKey, jsonEncode(encoded));
+      return list;
+    } catch (e) {
+      // 3. Fallback to local cache backup if Firestore is unavailable
+      return localList;
     }
   }
 
@@ -62,13 +63,13 @@ class TrusteeRepository {
     final encoded = trustees.map((t) => t.toJson()).toList();
     await _storage.saveString(_trusteesKey, jsonEncode(encoded));
     for (final trustee in trustees) {
-      await _firestore.upsertDocument('trustees', trustee.id, trustee.toJson());
+      await _firestore.upsertDocument('users/$userId/trustees', trustee.id, trustee.toJson());
     }
   }
 
   Future<void> deleteTrustee(String id) async {
     if (userId == null || userId!.isEmpty) return;
-    await _firestore.deleteDocument('trustees', id);
+    await _firestore.deleteDocument('users/$userId/trustees', id);
   }
 
   Future<void> clearTrustees() async {
@@ -77,14 +78,12 @@ class TrusteeRepository {
     await _storage.remove(_legacyTrusteesKey);
     if (userId == null) return;
     final remote = await _firestore.queryCollection(
-      'trustees',
-      ownerId: userId,
-      ownerField: 'userId',
+      'users/$userId/trustees',
     );
     for (final trustee in remote) {
       final id = trustee['id']?.toString();
       if (id != null && id.isNotEmpty) {
-        await _firestore.deleteDocument('trustees', id);
+        await _firestore.deleteDocument('users/$userId/trustees', id);
       }
     }
   }
