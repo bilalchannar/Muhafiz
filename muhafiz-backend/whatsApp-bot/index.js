@@ -45,7 +45,6 @@ function createClient() {
       "--disable-gpu",
       "--no-first-run",
       "--no-zygote",
-      "--single-process", // Essential to conserve memory on Render Free Tier
       "--disable-extensions"
     ],
   };
