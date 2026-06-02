@@ -176,6 +176,16 @@ app.post("/sendMassMsg", authMiddleware, async (req, res) => {
 app.get("/qr", async (req, res) => {
   try {
     const response = await fetch(`${WHATSAPP_BOT_URL}/qr-code`);
+    
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      return res.status(503).send(`
+        <h1>⏳ WhatsApp Bot Service is starting up...</h1>
+        <p>The bot microservice is currently booting up on Render. Please wait 1-2 minutes and reload this page.</p>
+        <meta http-equiv="refresh" content="10">
+      `);
+    }
+
     const status = await response.json();
 
     if (status.ready) {
