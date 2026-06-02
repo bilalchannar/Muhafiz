@@ -12,6 +12,7 @@ const { validatePhone, validateMessage } = require("./utils/validation");
 const authRoutes = require("./Routes/auth");
 
 const app = express();
+app.set("trust proxy", 1); // Trust proxy headers for accurate client IP rate limiting on Render
 app.use(cors());
 app.use(express.json());
 
