@@ -1,62 +1,103 @@
-const { MongoClient } = require("mongodb");
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || "https://start-of-firebase-default-rtdb.firebaseio.com";
 
-const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || "muhafiz";
-
-let db = null;
-let client = null;
+let isInitialized = false;
 
 async function connectDB() {
-  if (db) return db;
-
-  if (!MONGODB_URI) {
-    console.error("❌ ERROR: MONGODB_URI is not set in environment variables!");
-    throw new Error("MONGODB_URI environment variable is required.");
+  if (!FIREBASE_DB_URL) {
+    console.error("❌ ERROR: FIREBASE_DB_URL is not set in environment variables!");
+    throw new Error("FIREBASE_DB_URL environment variable is required.");
   }
-
-  try {
-    client = new MongoClient(MONGODB_URI);
-    await client.connect();
-    db = client.db(MONGODB_DB_NAME);
-    console.log("✅ Successfully connected to MongoDB Database");
-
-    // Initialize Collections & TTL Indexes for Automatic Expiration
-    try {
-      // 1. OTPs TTL index (auto-expire documents after their expiresAt timestamp)
-      await db.collection("otps").createIndex(
-        { expiresAt: 1 },
-        { expireAfterSeconds: 0 }
-      );
-      // Ensure unique index on phone for faster lookup and preventing duplicates
-      await db.collection("otps").createIndex(
-        { phone: 1 },
-        { unique: true }
-      );
-
-      // 2. Sessions TTL index
-      await db.collection("sessions").createIndex(
-        { expiresAt: 1 },
-        { expireAfterSeconds: 0 }
-      );
-      await db.collection("sessions").createIndex(
-        { sessionId: 1 },
-        { unique: true }
-      );
-
-      console.log("📁 MongoDB Collections & TTL Indexes verified");
-    } catch (indexError) {
-      console.warn("⚠️ Warning creating database indexes:", indexError.message);
-    }
-
-    return db;
-  } catch (err) {
-    console.error("❌ MongoDB connection failed:", err);
-    throw err;
-  }
+  isInitialized = true;
+  console.log(`✅ Firebase Realtime DB configured at ${FIREBASE_DB_URL}`);
+  return true;
 }
 
-function getDB() {
-  return db;
-}
+const getDB = () => {
+  if (!isInitialized) return null;
+
+  return {
+    collection: (name) => ({
+      // findOne returns a single document matching the query
+      findOne: async (query) => {
+        try {
+          if (name === "sessions" && query.sessionId) {
+            const res = await fetch(`${FIREBASE_DB_URL}/sessions/${query.sessionId}.json`);
+            const data = await res.json();
+            return data;
+          }
+          if (name === "otps" && query.phone) {
+            const res = await fetch(`${FIREBASE_DB_URL}/otps/${query.phone}.json`);
+            const data = await res.json();
+            return data;
+          }
+        } catch (err) {
+          console.error(`Error in Firebase findOne for ${name}:`, err);
+        }
+        return null;
+      },
+
+      // insertOne writes a document to a specific path
+      insertOne: async (doc) => {
+        try {
+          if (name === "sessions" && doc.sessionId) {
+            await fetch(`${FIREBASE_DB_URL}/sessions/${doc.sessionId}.json`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(doc),
+            });
+            return { acknowledged: true, insertedId: doc.sessionId };
+          }
+        } catch (err) {
+          console.error(`Error in Firebase insertOne for ${name}:`, err);
+          throw err;
+        }
+      },
+
+      // updateOne updates properties using PATCH (partial merge)
+      updateOne: async (query, update, options) => {
+        try {
+          if (name === "otps" && query.phone) {
+            const data = update.$set || update;
+            await fetch(`${FIREBASE_DB_URL}/otps/${query.phone}.json`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data),
+            });
+            return { acknowledged: true, modifiedCount: 1 };
+          }
+        } catch (err) {
+          console.error(`Error in Firebase updateOne for ${name}:`, err);
+          throw err;
+        }
+      },
+
+      // deleteOne deletes the path
+      deleteOne: async (query) => {
+        try {
+          if (name === "sessions" && query.sessionId) {
+            await fetch(`${FIREBASE_DB_URL}/sessions/${query.sessionId}.json`, {
+              method: "DELETE",
+            });
+            return { acknowledged: true, deletedCount: 1 };
+          }
+          if (name === "otps" && query.phone) {
+            await fetch(`${FIREBASE_DB_URL}/otps/${query.phone}.json`, {
+              method: "DELETE",
+            });
+            return { acknowledged: true, deletedCount: 1 };
+          }
+        } catch (err) {
+          console.error(`Error in Firebase deleteOne for ${name}:`, err);
+          throw err;
+        }
+      },
+
+      // createIndex is a no-op in Firebase
+      createIndex: async () => {
+        return "mock_index";
+      },
+    }),
+  };
+};
 
 module.exports = { connectDB, getDB };

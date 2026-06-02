@@ -46,7 +46,7 @@ async function authMiddleware(req, res, next) {
       return res.status(401).json({ success: false, message: "Unauthorized: Invalid session" });
     }
 
-    if (session.expiresAt && new Date() > session.expiresAt) {
+    if (session.expiresAt && new Date() > new Date(session.expiresAt)) {
       await db.collection("sessions").deleteOne({ sessionId: token });
       return res.status(401).json({ success: false, message: "Unauthorized: Session expired" });
     }
