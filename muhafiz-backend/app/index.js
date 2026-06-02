@@ -57,7 +57,8 @@ function createWhatsAppClient() {
       "--disable-gpu",
       "--no-first-run",
       "--no-zygote",
-      "--disable-extensions"
+      "--disable-extensions",
+      "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     ],
   };
 
@@ -74,10 +75,6 @@ function createWhatsAppClient() {
     }),
     authTimeoutMs: 120000, // 2 minutes startup grace period
     qrTimeoutMs: 60000,    // 1 minute QR expiry period
-    webVersionCache: {
-      type: "remote",
-      remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
-    },
     puppeteer: puppeteerOptions,
   });
 
