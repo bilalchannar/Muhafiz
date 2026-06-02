@@ -2,6 +2,10 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 const rateLimit = require("express-rate-limit");
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const qrcode = require("qrcode-terminal");
+const path = require("path");
+const fs = require("fs");
 
 const { connectDB, getDB } = require("./db");
 const { validatePhone, validateMessage } = require("./utils/validation");
@@ -12,8 +16,126 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const WHATSAPP_BOT_URL = process.env.WHATSAPP_BOT_URL || "http://localhost:3001";
 const BOT_API_KEY = process.env.BOT_API_KEY || "muhafiz-bot-secret-key";
+const WHATSAPP_BOT_URL = process.env.WHATSAPP_BOT_URL || `http://localhost:${PORT}`;
+
+const WHATSAPP_CLIENT_ID = "muhafiz-whatsapp-bot";
+const SESSION_PATH = path.resolve(
+  process.env.SESSION_PATH || path.join(__dirname, "auth_session")
+);
+
+fs.mkdirSync(SESSION_PATH, { recursive: true });
+console.log(`🗂️ WhatsApp session path: ${SESSION_PATH}`);
+console.log(`🆔 WhatsApp client ID: ${WHATSAPP_CLIENT_ID}`);
+
+// ── WhatsApp Client Setup ──────────────────────────────────────────────
+let client;
+let isClientReady = false;
+let latestQrCode = null;
+
+// Helper to delete corrupted or disconnected session files
+function deleteSessionDir() {
+  const sessionDir = path.join(SESSION_PATH, ".wwebjs_auth", `session-${WHATSAPP_CLIENT_ID}`);
+  if (fs.existsSync(sessionDir)) {
+    try {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      console.log(`🗑️ Deleted session directory to reset authentication: ${sessionDir}`);
+    } catch (err) {
+      console.error(`❌ Failed to delete session directory:`, err);
+    }
+  }
+}
+
+function createWhatsAppClient() {
+  const puppeteerOptions = {
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-first-run",
+      "--no-zygote",
+      "--disable-extensions"
+    ],
+  };
+
+  if (process.platform === "win32") {
+    puppeteerOptions.executablePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  } else if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    puppeteerOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
+  client = new Client({
+    authStrategy: new LocalAuth({
+      clientId: WHATSAPP_CLIENT_ID,
+      dataPath: SESSION_PATH,
+    }),
+    authTimeoutMs: 120000, // 2 minutes startup grace period
+    qrTimeoutMs: 60000,    // 1 minute QR expiry period
+    webVersionCache: {
+      type: "remote",
+      remotePath: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
+    },
+    puppeteer: puppeteerOptions,
+  });
+
+  client.on("loading_screen", (percent, message) => {
+    console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
+  });
+
+  client.on("qr", (qr) => {
+    console.log("📲 WhatsApp QR code generated. Scan it with your phone.");
+    qrcode.generate(qr, { small: true });
+    latestQrCode = qr;
+  });
+
+  client.on("authenticated", () => {
+    console.log("🔑 WhatsApp authenticated successfully");
+  });
+
+  client.on("auth_failure", async (msg) => {
+    console.error("❌ WhatsApp Auth failure:", msg);
+    isClientReady = false;
+    latestQrCode = null;
+    try {
+      await client.destroy();
+    } catch (_) {}
+    deleteSessionDir(); // Clear corrupted session
+    console.log("🔄 Reinitializing WhatsApp client...");
+    createWhatsAppClient();
+  });
+
+  client.on("ready", () => {
+    isClientReady = true;
+    latestQrCode = null;
+    console.log("✅ WhatsApp client is ready!");
+  });
+
+  client.on("disconnected", async (reason) => {
+    isClientReady = false;
+    latestQrCode = null;
+    console.log("❌ WhatsApp client disconnected:", reason);
+    try {
+      await client.destroy();
+    } catch (_) {}
+    deleteSessionDir(); // Clear session to allow fresh login scan
+    console.log("🔄 Reinitializing WhatsApp client...");
+    createWhatsAppClient();
+  });
+
+  client.initialize();
+}
+
+/**
+ * Normalise a phone number to the WhatsApp chat-id format.
+ */
+function formatPhone(phone) {
+  let cleaned = String(phone).replace(/[\s\-\(\)]/g, "");
+  if (cleaned.startsWith("+")) cleaned = cleaned.slice(1);
+  if (cleaned.startsWith("00")) cleaned = cleaned.slice(2);
+  return `${cleaned}@c.us`;
+}
 
 // ── IP-Based Rate Limiting ─────────────────────────────────────────────
 const authLimiter = rateLimit({
@@ -68,15 +190,10 @@ async function triggerFallbackChannels(phone, message) {
 
 async function sendFallbackSMS(phone, message) {
   console.log(`[SMS FALLBACK] Sending SMS alert to ${phone}: "${message}"`);
-  // Developers can easily plug in Twilio or another SMS gateway here:
-  // const client = require('twilio')(accountSid, authToken);
-  // await client.messages.create({ body: message, to: phone, from: twilioNumber });
 }
 
 async function sendFallbackFCM(phone, message) {
   console.log(`[FCM FALLBACK] Sending Firebase Push Notification to account linked to ${phone}: "${message}"`);
-  // Developers can plug in Firebase Admin SDK here to send push alerts:
-  // await admin.messaging().send({ token: userFcmToken, notification: { title: "SOS Emergency", body: message } });
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────
@@ -85,8 +202,27 @@ async function sendFallbackFCM(phone, message) {
 app.use("/auth", authLimiter, authRoutes);
 
 // Protected Message Send Route
-app.post("/sendMessage", authMiddleware, async (req, res) => {
+app.post("/sendMessage", async (req, res) => {
   try {
+    // Simple API Key validation for external systems, or authenticate via session
+    const apiKey = req.headers["x-api-key"];
+    if (apiKey !== BOT_API_KEY) {
+      // If no API Key, require standard authMiddleware check
+      // We will perform session auth check here if header exists
+      const authHeader = req.headers.authorization;
+      if (authHeader) {
+        // Run auth inline
+        const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : authHeader;
+        const db = getDB();
+        const session = db ? await db.collection("sessions").findOne({ sessionId: token }) : null;
+        if (!session) {
+          return res.status(401).json({ success: false, message: "Unauthorized: Invalid session" });
+        }
+      } else {
+        return res.status(401).json({ success: false, message: "Unauthorized: Missing credentials" });
+      }
+    }
+
     const { phone, message } = req.body;
 
     if (!phone || !message) {
@@ -97,21 +233,26 @@ app.post("/sendMessage", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid phone number or message format" });
     }
 
-    // Relay to the single WhatsApp bot service
-    const response = await fetch(`${WHATSAPP_BOT_URL}/sendMessage`, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json",
-        "x-api-key": BOT_API_KEY
-      },
-      body: JSON.stringify({ phone, message }),
-    });
+    if (!isClientReady) {
+      return res.status(503).json({ success: false, message: "WhatsApp client is not ready yet" });
+    }
 
-    const result = await response.json();
-    return res.status(response.status).json(result);
+    const chatId = formatPhone(phone);
+    const isRegistered = await client.isRegisteredUser(chatId);
+    if (!isRegistered) {
+      return res.status(400).json({
+        success: false,
+        message: `Phone number ${phone} is not registered on WhatsApp.`,
+      });
+    }
+
+    await client.sendMessage(chatId, message);
+    console.log(`📨 Message sent to ${chatId}`);
+
+    return res.status(200).json({ success: true, message: "Message sent successfully" });
   } catch (err) {
-    console.error("Relay /sendMessage failed:", err);
-    return res.status(500).json({ success: false, message: "Failed to relay message to WhatsApp bot" });
+    console.error("Local /sendMessage failed:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -132,6 +273,10 @@ app.post("/sendMassMsg", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid message format" });
     }
 
+    if (!isClientReady) {
+      return res.status(503).json({ success: false, message: "WhatsApp client is not ready yet" });
+    }
+
     const results = [];
     for (const p of phone) {
       if (!validatePhone(p)) {
@@ -140,26 +285,17 @@ app.post("/sendMassMsg", authMiddleware, async (req, res) => {
       }
 
       try {
-        const response = await fetch(`${WHATSAPP_BOT_URL}/sendMessage`, {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "x-api-key": BOT_API_KEY
-          },
-          body: JSON.stringify({ phone: p, message }),
-        });
-
-        const result = await response.json();
-        
-        if (result.success) {
-          results.push({ phone: p, success: true });
-        } else {
-          // If WhatsApp fails, trigger the fallback channels
+        const chatId = formatPhone(p);
+        const isRegistered = await client.isRegisteredUser(chatId);
+        if (!isRegistered) {
           await triggerFallbackChannels(p, message);
-          results.push({ phone: p, success: false, fallbackTriggered: true, error: result.message });
+          results.push({ phone: p, success: false, fallbackTriggered: true, error: "Not registered on WhatsApp" });
+          continue;
         }
+
+        await client.sendMessage(chatId, message);
+        results.push({ phone: p, success: true });
       } catch (err) {
-        // Network error or bot offline
         await triggerFallbackChannels(p, message);
         results.push({ phone: p, success: false, fallbackTriggered: true, error: err.message });
       }
@@ -172,125 +308,122 @@ app.post("/sendMassMsg", authMiddleware, async (req, res) => {
   }
 });
 
-// View QR Code proxy from WhatsApp Bot service
-app.get("/qr", async (req, res) => {
-  try {
-    const response = await fetch(`${WHATSAPP_BOT_URL}/qr-code`);
-    
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      return res.status(503).send(`
-        <h1>⏳ WhatsApp Bot Service is starting up...</h1>
-        <p>The bot microservice is currently booting up on Render. Please wait 1-2 minutes and reload this page.</p>
-        <meta http-equiv="refresh" content="10">
-      `);
-    }
-
-    const status = await response.json();
-
-    if (status.ready) {
-      return res.send("<h1>✅ WhatsApp is already connected!</h1>");
-    }
-
-    if (!status.qr) {
-      return res.send("<h1>⏳ QR Code not generated yet. Please wait or reload...</h1><meta http-equiv='refresh' content='5'>");
-    }
-
-    const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Scan WhatsApp QR Code</title>
-      <script src="https://cdn.jsdelivr.net/npm/qrcode@1.4.4/build/qrcode.min.js"></script>
-      <meta http-equiv="refresh" content="15">
-      <style>
-        body {
-          font-family: sans-serif;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          margin: 0;
-          background-color: #f0f2f5;
-        }
-        .container {
-          background: white;
-          padding: 30px;
-          border-radius: 10px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-          text-align: center;
-        }
-        canvas {
-          margin: 20px 0;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h2>Scan this QR Code</h2>
-        <p>This page automatically refreshes every 15 seconds to keep the code fresh.</p>
-        <canvas id="canvas"></canvas>
-        <script>
-          const qrText = ${JSON.stringify(status.qr)};
-          if (qrText) {
-            QRCode.toCanvas(document.getElementById('canvas'), qrText, { width: 300 }, function (error) {
-              if (error) console.error(error);
-            });
-          }
-        </script>
-      </div>
-    </body>
-    </html>
-    `;
-    return res.send(html);
-  } catch (err) {
-    return res.status(500).send(`<h1>❌ Error connecting to WhatsApp bot microservice</h1><p>${err.message}</p>`);
+// View QR Code directly on the server
+app.get("/qr", (req, res) => {
+  if (isClientReady) {
+    return res.send("<h1>✅ WhatsApp is already connected!</h1>");
   }
+
+  if (!latestQrCode) {
+    return res.send("<h1>⏳ QR Code not generated yet. Please wait or reload...</h1><meta http-equiv='refresh' content='5'>");
+  }
+
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>Scan WhatsApp QR Code</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.4.4/build/qrcode.min.js"></script>
+    <meta http-equiv="refresh" content="15">
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #f0f2f5;
+      }
+      .container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        text-align: center;
+      }
+      canvas {
+        margin: 20px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Scan this QR Code</h2>
+      <p>This page automatically refreshes every 15 seconds to keep the code fresh.</p>
+      <canvas id="canvas"></canvas>
+      <script>
+        const qrText = ${JSON.stringify(latestQrCode)};
+        if (qrText) {
+          QRCode.toCanvas(document.getElementById('canvas'), qrText, { width: 300 }, function (error) {
+            if (error) console.error(error);
+          });
+        }
+      </script>
+    </div>
+  </body>
+  </html>
+  `;
+  return res.send(html);
+});
+
+// Endpoint for internal API checks
+app.get("/qr-code", (req, res) => {
+  res.json({ qr: latestQrCode, ready: isClientReady });
 });
 
 // Proxy route for botInfo
-app.get("/botInfo", authMiddleware, async (req, res) => {
-  try {
-    const response = await fetch(`${WHATSAPP_BOT_URL}/botInfo`, {
-      headers: { "x-api-key": BOT_API_KEY }
-    });
-    const result = await response.json();
-    return res.status(response.status).json(result);
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+app.get("/botInfo", authMiddleware, (req, res) => {
+  if (!isClientReady || !client || !client.info) {
+    return res.json({ ready: false, hasClient: !!client, hasInfo: !!(client && client.info) });
   }
+  res.json({
+    ready: true,
+    wid: client.info.wid,
+    pushname: client.info.pushname,
+    platform: client.info.platform,
+  });
 });
 
 // Proxy route for checkMessages
 app.get("/checkMessages", authMiddleware, async (req, res) => {
   try {
     const { phone } = req.query;
-    const response = await fetch(`${WHATSAPP_BOT_URL}/checkMessages?phone=${phone}`, {
-      headers: { "x-api-key": BOT_API_KEY }
-    });
-    const result = await response.json();
-    return res.status(response.status).json(result);
+    if (!phone) {
+      return res.status(400).json({ success: false, message: "phone query param is required" });
+    }
+    if (!isClientReady) {
+      return res.status(503).json({ success: false, message: "WhatsApp client is not ready yet" });
+    }
+    const chatId = formatPhone(phone);
+    const chat = await client.getChatById(chatId);
+    if (!chat) {
+      return res.json({ success: false, message: `No chat found for ${chatId}` });
+    }
+    const messages = await chat.fetchMessages({ limit: 5 });
+    const formatted = messages.map(m => ({
+      fromMe: m.fromMe,
+      body: m.body,
+      timestamp: m.timestamp,
+      ack: m.ack,
+    }));
+    return res.json({ success: true, chatId, formatted });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // Health check
-app.get("/health", async (_req, res) => {
-  try {
-    const response = await fetch(`${WHATSAPP_BOT_URL}/health`);
-    const result = await response.json();
-    return res.json({ status: "ok", dbConnected: !!getDB(), whatsappBot: result });
-  } catch (err) {
-    return res.json({ status: "ok", dbConnected: !!getDB(), whatsappBot: { status: "offline", error: err.message } });
-  }
+app.get("/health", (req, res) => {
+  return res.json({ status: "ok", dbConnected: !!getDB(), whatsappBot: { status: isClientReady ? "online" : "offline" } });
 });
 
-// Connect to MongoDB and start the Express server
+// Connect to Database, start WhatsApp client, and boot Server
 async function bootstrap() {
   try {
     await connectDB();
+    createWhatsAppClient(); // Initializing WhatsApp Bot inside the same server process!
     app.listen(PORT, () => {
       console.log(`🚀 App API Server running on http://localhost:${PORT}`);
     });
