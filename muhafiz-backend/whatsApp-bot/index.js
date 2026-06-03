@@ -35,24 +35,62 @@ function deleteSessionDir() {
   }
 }
 
+// ── Memory Watchdog ─────────────────────────────────────────────────────
+// Render free tier has ~512MB RAM. If we exceed 420MB, restart the process
+// so Render can recover instead of getting OOM-killed mid-session.
+const MEMORY_LIMIT_MB = parseInt(process.env.MEMORY_LIMIT_MB || "420");
+setInterval(() => {
+  const usedMB = process.memoryUsage().rss / 1024 / 1024;
+  if (usedMB > MEMORY_LIMIT_MB) {
+    console.error(`⚠️ Memory usage ${usedMB.toFixed(0)}MB exceeds limit ${MEMORY_LIMIT_MB}MB. Restarting process...`);
+    process.exit(1); // Render will auto-restart the service
+  }
+}, 30_000); // check every 30s
+
 function createClient() {
   const puppeteerOptions = {
     headless: true,
     args: [
+      // Security sandbox (required for Docker/Render)
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
+
+      // Memory & process reduction
+      "--disable-dev-shm-usage",        // Use /tmp instead of /dev/shm (critical for Render)
+      "--single-process",               // Run renderer in browser process (saves ~80MB)
+      "--no-zygote",                    // No zygote process (saves memory)
+      "--js-flags=--max-old-space-size=128", // Limit V8 heap to 128MB
+
+      // Disable unnecessary features to save RAM
       "--disable-gpu",
-      "--no-first-run",
-      "--no-zygote",
+      "--disable-software-rasterizer",
       "--disable-extensions",
-      "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      "--js-flags=--max-old-space-size=150",
-      "--renderer-process-limit=1",
+      "--disable-default-apps",
+      "--disable-sync",
+      "--disable-translate",
+      "--disable-background-networking",
+      "--disable-client-side-phishing-detection",
+      "--disable-hang-monitor",
+      "--disable-popup-blocking",
+      "--disable-prompt-on-repost",
+      "--disable-renderer-backgrounding",
       "--disable-background-timer-throttling",
       "--disable-backgrounding-occluded-windows",
-      "--disable-ipc-flooding-protection"
+      "--disable-ipc-flooding-protection",
+      "--metrics-recording-only",
+      "--mute-audio",
+      "--no-first-run",
+      "--safebrowsing-disable-auto-update",
+
+      // Reduce network overhead
+      "--no-proxy-server",
+
+      // Keep UA consistent
+      "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     ],
+    // Block images, fonts, stylesheets — WhatsApp Web only needs JS/XHR
+    // This significantly reduces CPU & memory during loading
+    protocolTimeout: 120000,
   };
 
   if (process.platform === "win32") {
@@ -66,13 +104,18 @@ function createClient() {
       clientId: WHATSAPP_CLIENT_ID,
       dataPath: SESSION_PATH,
     }),
-    authTimeoutMs: 120000, // 2 minutes startup grace period
-    qrTimeoutMs: 60000,    // 1 minute QR expiry period
+    authTimeoutMs: 180000, // 3 minutes — Render is slow, give it more time
+    qrTimeoutMs: 90000,    // 90s QR expiry
+    // Cache the WhatsApp Web version locally so it doesn't re-download on every restart
+    webVersionCache: {
+      type: "local",
+      path: path.join(SESSION_PATH, "wwebjs_cache"),
+    },
     puppeteer: puppeteerOptions,
   });
 
   client.on("loading_screen", (percent, message) => {
-    console.log(`⏳ Loading: ${percent}% - ${message}`);
+    console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
   });
 
   client.on("qr", (qr) => {
@@ -95,8 +138,8 @@ function createClient() {
       await client.destroy();
     } catch (_) {}
     deleteSessionDir(); // Clear corrupted session
-    console.log("🔄 Reinitializing client...");
-    createClient();
+    console.log("🔄 Reinitializing client in 5s...");
+    setTimeout(createClient, 5000);
   });
 
   client.on("ready", () => {
@@ -112,15 +155,33 @@ function createClient() {
     try {
       await client.destroy();
     } catch (_) {}
-    deleteSessionDir(); // Clear session to allow fresh login scan
-    console.log("🔄 Reinitializing client...");
-    createClient();
+    // Only clear session for auth-related disconnects, not for network blips
+    if (reason === "LOGOUT" || reason === "CONFLICT") {
+      deleteSessionDir();
+    }
+    console.log("🔄 Reinitializing client in 10s...");
+    setTimeout(createClient, 10000); // Wait 10s before reconnect to avoid hammering memory
   });
 
   client.initialize();
 }
 
 createClient();
+
+// ── Graceful Shutdown ──────────────────────────────────────────────────
+// Render sends SIGTERM before killing the container. Destroy Chromium cleanly
+// so the session files are flushed and the next deploy starts clean.
+async function gracefulShutdown(signal) {
+  console.log(`\n🛑 Received ${signal}. Shutting down gracefully...`);
+  try {
+    if (client) await client.destroy();
+  } catch (_) {}
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
+
+
 
 /**
  * Normalise a phone number to the WhatsApp chat-id format.
