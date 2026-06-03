@@ -1,4 +1,11 @@
-const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
+let dbUrl = process.env.FIREBASE_DB_URL;
+if (dbUrl) {
+  dbUrl = dbUrl.trim();
+  if (dbUrl.endsWith("/")) {
+    dbUrl = dbUrl.slice(0, -1);
+  }
+}
+const FIREBASE_DB_URL = dbUrl || "https://start-of-firebase-default-rtdb.firebaseio.com";
 
 let isInitialized = false;
 const localMockDb = {
