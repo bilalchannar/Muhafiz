@@ -5,7 +5,7 @@ const router = express.Router();
 const { getDB } = require("../../db");
 const { validatePhone, validateOtp } = require("../../utils/validation");
 
-const WHATSAPP_BOT_URL = process.env.WHATSAPP_BOT_URL || "http://localhost:3001";
+const WHATSAPP_BOT_URL = process.env.WHATSAPP_BOT_URL || "http://localhost:3000";
 const BOT_API_KEY = process.env.BOT_API_KEY || "muhafiz-bot-secret-key";
 
 /**
